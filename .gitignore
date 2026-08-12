@@ -2,5 +2,7 @@
 *.nacp
 *.nro
 build/*
+build-macos/*
 libs/quirc/*
 !libs/quirc/PKGBUILD
+!libs/quirc/upstream

@@ -8,7 +8,9 @@ namespace fs = std::filesystem;
 
 #include "mii_ext.h"
 #include "convert_mii.h"
+#if MII_PORT_ENABLE_QR
 #include "mii_qr.hpp"
+#endif
 #include "errors.h"
 
 void errorCodeNotify(Result res) {
@@ -70,6 +72,18 @@ void errorNotify(Result res, std::string success_message = "Imported!") {
             brls::Application::notify("qrkey.txt not found.\nSee \"About\" tab.");
             break;
         }
+        case FILE_READ_FAILED: {
+            brls::Application::notify("Could not read the selected file");
+            break;
+        }
+        case FILE_WRITE_FAILED: {
+            brls::Application::notify("Could not write the selected file");
+            break;
+        }
+        case INVALID_FILE_SIZE: {
+            brls::Application::notify("File has an invalid size for this Mii format");
+            break;
+        }
         default: {
             errorCodeNotify(res);
             break;
@@ -78,34 +92,33 @@ void errorNotify(Result res, std::string success_message = "Imported!") {
 }
 
 template <typename T>
-bool readFromFile(const char *path, T *out) {
-    size_t size_read;
-    FILE* file = fopen(path, "r");
+Result readFromFile(const char *path, T *out) {
+    FILE* file = fopen(path, "rb");
     if(file == nullptr) {
         printf("File open error: %d\n", errno);
-        return false;
-    } 
-
-    size_read = fread(out, 1, sizeof(T), file);
-    if (size_read != sizeof(T)) return false;
-
-    fclose(file);
-    return true;
-}
-template <typename T>
-bool writeToFile(const char *path, T *out) {
-    size_t size_written;
-    FILE* file = fopen(path, "w");
-    if(file == nullptr) {
-        printf("File open error: %d\n", errno);
-        return false;
+        return FILE_READ_FAILED;
     }
 
-    size_written = fwrite(out, 1, sizeof(T), file);
-    if (size_written != sizeof(T)) return false;
-
+    const size_t size_read = fread(out, 1, sizeof(T), file);
+    // Every supported binary Mii format has a fixed size. Reject both
+    // truncated files and trailing data rather than importing a partial record.
+    const bool has_extra_data = fgetc(file) != EOF;
     fclose(file);
-    return true;
+    if (size_read != sizeof(T) || has_extra_data) return INVALID_FILE_SIZE;
+
+    return 0;
+}
+template <typename T>
+Result writeToFile(const char *path, const T *out) {
+    FILE* file = fopen(path, "wb");
+    if(file == nullptr) {
+        printf("File open error: %d\n", errno);
+        return FILE_WRITE_FAILED;
+    }
+
+    const size_t size_written = fwrite(out, 1, sizeof(T), file);
+    fclose(file);
+    return size_written == sizeof(T) ? 0 : FILE_WRITE_FAILED;
 }
 
 template <typename T>
@@ -225,19 +238,20 @@ Result miiDbExportToFile(const char* file_path) {
     NFIF Db;
     Result res = exportNFIF(&Db);
     if(R_FAILED(res)) return res;
-    writeToFile(file_path, &Db);    
-    return 0;
+    return writeToFile(file_path, &Db);
 }
 
 Result miiDbImportFromFile(const char* file_path) {
     NFIF Db;
-    readFromFile(file_path, &Db);
+    Result res = readFromFile(file_path, &Db);
+    if (R_FAILED(res)) return res;
     return importNFIF(&Db);
 }
 
 Result miiDbAddOrReplaceStoreDataFromFile(const char* file_path) {
     storeData in_data;
-    readFromFile(file_path, &in_data);
+    Result res = readFromFile(file_path, &in_data);
+    if (R_FAILED(res)) return res;
     // run this to regenerate checksums
     setStoreDataCrc16(&in_data);
     return addOrReplaceStoreDataWithPrompt(&in_data);
@@ -248,7 +262,8 @@ Result miiDbAddOrReplaceCoreDataFromFile(const char* file_path) {
     storeData new_data;
     MiiCreateId id;
 
-    readFromFile(file_path, &in_data);
+    Result res = readFromFile(file_path, &in_data);
+    if (R_FAILED(res)) return res;
     
     // get createID from file name, or use a random one
     std::string filename = fs::path(file_path).filename().string();
@@ -273,7 +288,8 @@ Result miiDbAddOrReplaceCharInfoFromFile(const char* file_path) {
     storeData new_data;
     MiiCreateId id;
 
-    readFromFile(file_path, &in_data);
+    Result res = readFromFile(file_path, &in_data);
+    if (R_FAILED(res)) return res;
 
     charInfoToCoreData(&in_data, &intermediate, &id);
     coreDataToStoreData(&intermediate, &id, &new_data);
@@ -281,6 +297,7 @@ Result miiDbAddOrReplaceCharInfoFromFile(const char* file_path) {
     return addOrReplaceStoreDataWithPrompt(&new_data);
 }
 
+#if MII_PORT_ENABLE_QR
 Result showQrPopup(ver3StoreData* data, std::string name) {
     int qr_width = 0;
     std::unique_ptr<u32[]> qr_RGBA;
@@ -308,6 +325,7 @@ Result importMiiQr(const char* path) {
     ver3StoreDataToStoreData(&ver3mii, &mii);
     return addOrReplaceStoreData(&mii);
 }
+#endif
 
 Result importMiiFile(fs::path file_path) {
     std::string ext = file_path.extension().string();
@@ -326,9 +344,11 @@ Result importMiiFile(fs::path file_path) {
     else if(ext == ".storedata") {
         res = miiDbAddOrReplaceStoreDataFromFile(file_path.c_str());
     }
+    #if MII_PORT_ENABLE_QR
     else if(ext == ".jpg" || ext == ".jpeg") {
         res = importMiiQr(file_path.c_str());
     }
+    #endif
     else {
         return UNSUPPORTED_EXT;
     }

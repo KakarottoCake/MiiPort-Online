@@ -42,9 +42,14 @@ BUILD		:=	build
 SOURCES		:=	source
 DATA		:=	data
 ICON		:=	resources/icon/MiiPortTitle.jpg
-INCLUDES	:=	include
+INCLUDES	:=	include libs/glm
 APP_AUTHOR	:=	Genwald
 APP_VERSION	:=	0.1.2
+
+# QR-image importing is optional. Catalog downloads use compact CHARINFO files,
+# so disabling it reduces binary size and avoids a JPEG decoder dependency.
+ENABLE_QR	?=	0
+ENABLE_NETWORK	?=	1
 
 ROMFS				:=	resources
 BOREALIS_PATH		:=	libs/borealis
@@ -59,14 +64,27 @@ CFLAGS	:=	-g -Wall -O2 -ffunction-sections \
 			$(ARCH) $(DEFINES)
 
 CFLAGS	+=	$(INCLUDE) -D__SWITCH__ \
-			-DBOREALIS_RESOURCES="\"$(BOREALIS_RESOURCES)\""
+			-DBOREALIS_RESOURCES="\"$(BOREALIS_RESOURCES)\"" \
+			-DMII_PORT_ENABLE_QR=$(ENABLE_QR)
 
 CXXFLAGS	:= $(CFLAGS) -std=c++1z -O2
 
 ASFLAGS	:=	-g $(ARCH)
 LDFLAGS	=	-specs=$(DEVKITPRO)/libnx/switch.specs -g $(ARCH) -Wl,-Map,$(notdir $*.map)
 
-LIBS	:= -lnx -lm -lturbojpeg -lquirc -lmbedcrypto
+LIBS	:= -lnx -lm
+
+ifeq ($(ENABLE_NETWORK),1)
+# libcurl is static on Switch. Its libnx/zlib dependencies must follow it
+# on the link line so the linker can resolve curl's networking symbols.
+LIBS		:=	-lcurl -lnx -lz -lnx -lm
+endif
+
+ifeq ($(ENABLE_QR),1)
+SOURCES		+=	libs/quirc/upstream/lib
+INCLUDES	+=	libs/quirc/upstream/lib
+LIBS		+=	-lturbojpeg -lmbedcrypto
+endif
 
 #---------------------------------------------------------------------------------
 # list of directories containing libraries, this must be the top level containing

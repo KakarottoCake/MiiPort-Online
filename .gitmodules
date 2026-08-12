@@ -1,6 +1,12 @@
 [submodule "libs/borealis"]
 	path = libs/borealis
-	url = https://github.com/m59peacemaker/borealis/
+	url = https://github.com/KakarottoCake/borealis/
 [submodule "libs/scope_guard"]
 	path = libs/scope_guard
 	url = https://github.com/ricab/scope_guard
+[submodule "libs/quirc/upstream"]
+	path = libs/quirc/upstream
+	url = https://github.com/dlbeer/quirc.git
+[submodule "libs/glm"]
+	path = libs/glm
+	url = https://github.com/g-truc/glm.git
