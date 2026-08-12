@@ -1,7 +1,35 @@
-# MiiPort
-A Nintendo Switch homebrew for importing and exporting Miis.
+# MiiPort Gallery
+
+A performance-first Nintendo Switch homebrew for importing, exporting, browsing, and downloading Miis. It is based on Genwald's MiiPort and retains its local import/export workflow.
+
+The Browse tab uses InfiniMii's console API rather than scraping HTML. Categories and search are requested only when selected; a selected Mii downloads as an 88-byte Switch `.charinfo` record and is then imported through MiiPort's existing duplicate-ID flow. See [docs/infinimii-adapter.md](docs/infinimii-adapter.md).
+
+## Performance budget
+
+- Catalog responses are capped at 96 KiB.
+- Results use a controller-navigable 4×3 image grid and can page through the full provider result set with L/R.
+- Exactly one catalog, thumbnail, or download request is active at a time; there is no background prefetch or crawl.
+- Successful catalog pages are retained on SD for 10 minutes before another provider request is made.
+- Only the visible page's 12 thumbnails can occupy GPU memory. Previews load serially, are cached on SD for 30 days, and the cache is pruned to 240 compact RGBA entries.
+- The provider's fixed 64×64 RGBA previews avoid PNG/JPEG decoding work on console.
+
+## Build
+
+Run `scripts/build-local -j2`. This wrapper makes a temporary no-space copy before invoking devkitPro, so builds work even when the checkout directory contains spaces. It writes `MiiPort.nro` to the repository root.
+
+QR-image importing is disabled by default because the catalog workflow downloads compact `.charinfo` files directly. Enable the legacy QR feature with `scripts/build-local ENABLE_QR=1` on systems with Switch libjpeg-turbo installed.
+
+### Internal macOS test harness
+
+`scripts/build-macos-test` builds `build-macos/MiiPortMacTest`, a non-release
+command-line harness around the same production parser, cache, transport, and
+request client. Running it without arguments uses a local fixture and makes no
+network request. `build-macos/MiiPortMacTest --live --query mario` performs one
+bounded live request for integration testing.
+
 ## Installation
-[Download a release](https://github.com/Genwald/MiiPort/releases/latest) and then place the .nro file at `sd:/switch/MiiPort.nro`
+
+Copy the locally built `MiiPort.nro` to `sd:/switch/MiiPort.nro`.
 
 
 Some features require the setting 

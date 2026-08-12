@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+# Internal native harness for testing the production catalog code on macOS.
+# This is intentionally not an application bundle or release artifact.
+set -euo pipefail
+
+project_root="$(cd "$(dirname "$0")/.." && pwd)"
+output_dir="$project_root/build-macos"
+mkdir -p "$output_dir"
+
+clang++ \
+    -std=c++17 -O2 -Wall -Wextra -Wpedantic \
+    -I"$project_root/include" \
+    "$project_root/tests/macos/main.cpp" \
+    "$project_root/source/catalog.cpp" \
+    "$project_root/source/catalog_cache.cpp" \
+    "$project_root/source/catalog_client.cpp" \
+    "$project_root/source/catalog_transport.cpp" \
+    "$project_root/source/infinimii.cpp" \
+    -lcurl \
+    -o "$output_dir/MiiPortMacTest"
+
+echo "$output_dir/MiiPortMacTest"

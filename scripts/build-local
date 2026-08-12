@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+# Build from a temporary path without spaces. The upstream Makefile uses paths
+# that GNU make cannot safely include when the checkout directory contains one.
+set -euo pipefail
+
+root_dir="$(cd "$(dirname "$0")/.." && pwd)"
+scratch_dir="$(mktemp -d "${TMPDIR:-/tmp}/miiport-build.XXXXXX")"
+
+cleanup() {
+    rm -rf "$scratch_dir"
+}
+trap cleanup EXIT
+
+rsync -a \
+    --exclude '.git' \
+    --exclude 'build' \
+    --exclude '*.elf' \
+    --exclude '*.nacp' \
+    --exclude '*.nro' \
+    "$root_dir/" "$scratch_dir/"
+
+make -C "$scratch_dir" TARGET=MiiPort "$@"
+
+for artifact in MiiPort.nro MiiPort.elf MiiPort.nacp; do
+    if [[ -f "$scratch_dir/$artifact" ]]; then
+        cp "$scratch_dir/$artifact" "$root_dir/$artifact"
+    fi
+done

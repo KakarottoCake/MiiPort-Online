@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <functional>
 #include <string>
 #include <cstring>
 
@@ -8,8 +9,12 @@
 #define private protected
 #include <borealis.hpp>
 #undef private
+#include <borealis/swkbd.hpp>
 
 #include "miiport.hpp"
+#include "catalog.hpp"
+#include "catalog_client.hpp"
+#include "catalog_grid.hpp"
 
 
 const AppletType APPLET_TYPE = appletGetAppletType();
@@ -122,18 +127,90 @@ class FocusHeader : public brls::Header {
 
 const std::string TITLE = "MiiPort";
 
+class CatalogResultsFrame : public brls::AppletFrame {
+  public:
+    using PageCallback = std::function<void(CatalogSection, const std::string&, size_t)>;
+    using CloseCallback = std::function<void(CatalogResultsFrame*)>;
+
+    CatalogResultsFrame(PageCallback onPage, MiiGrid::SelectCallback onSelect,
+                        CloseCallback onClose)
+        : brls::AppletFrame(true, true), onPage(std::move(onPage)),
+          onSelect(std::move(onSelect)), onClose(std::move(onClose)) {
+        registerAction("Previous page", brls::Key::L, [this] {
+            if (page.start < CatalogClient::PAGE_SIZE) return false;
+            this->onPage(page.section, page.query, page.start - CatalogClient::PAGE_SIZE);
+            return true;
+        });
+        registerAction("Next page", brls::Key::R, [this] {
+            if (!page.hasMore) return false;
+            this->onPage(page.section, page.query, page.start + CatalogClient::PAGE_SIZE);
+            return true;
+        });
+        setFooterText("B  Back     L/R  Change page");
+    }
+
+    ~CatalogResultsFrame() override { notifyClosed(); }
+
+    bool onCancel() override {
+        notifyClosed();
+        return brls::AppletFrame::onCancel();
+    }
+
+    void setPage(const CatalogPage& nextPage, bool focusGrid = true) {
+        if (focusGrid) brls::Application::giveFocus(nullptr);
+        MiiGrid* previousGrid = grid;
+        page = nextPage;
+        grid = new MiiGrid(page.entries, onSelect);
+        setContentView(grid);
+        if (previousGrid != nullptr) {
+            previousGrid->willDisappear(true);
+            delete previousGrid;
+        }
+
+        const size_t pageNumber = page.start / CatalogClient::PAGE_SIZE + 1;
+        const size_t pageCount = std::max<size_t>(1,
+            (page.total + CatalogClient::PAGE_SIZE - 1) / CatalogClient::PAGE_SIZE);
+        const std::string context = page.query.empty() ? CatalogStore::title(page.section) : page.query;
+        setTitle(page.query.empty() ? CatalogStore::title(page.section) : "Search Results");
+        setSubtitle("InfiniMii", context + " · Page " + std::to_string(pageNumber) +
+                    " of " + std::to_string(pageCount));
+        setActionAvailable(brls::Key::L, page.start >= CatalogClient::PAGE_SIZE);
+        setActionAvailable(brls::Key::R, page.hasMore);
+        invalidate();
+        if (focusGrid) brls::Application::giveFocus(grid);
+    }
+
+    void setNetworkBusy(bool busy) {
+        if (grid != nullptr) grid->setThumbnailLoadingEnabled(!busy);
+    }
+
+  private:
+    CatalogPage page;
+    MiiGrid* grid = nullptr;
+    PageCallback onPage;
+    MiiGrid::SelectCallback onSelect;
+    CloseCallback onClose;
+    bool closeNotified = false;
+
+    void notifyClosed() {
+        if (closeNotified) return;
+        closeNotified = true;
+        if (onClose) onClose(this);
+    }
+};
+
 int main(int argc, char* argv[]) {
     brls::Logger::setLogLevel(brls::LogLevel::INFO);
 
     brls::Style custom_style = brls::Style::horizon();
     custom_style.Sidebar.width = 280;
     custom_style.Sidebar.marginLeft = 55;
-    custom_style.Header.height = 25;
-    custom_style.Header.fontSize = 25;
-    custom_style.Header.rectangleWidth = 9;
-    custom_style.List.Item.height = 65;
-    custom_style.List.Item.heightWithSubLabel = 74;
-    custom_style.List.spacing = 45;
+    custom_style.Header.height = 44;
+    custom_style.Header.fontSize = 20;
+    custom_style.Header.rectangleWidth = 5;
+    custom_style.List.Item.height = 69;
+    custom_style.List.Item.heightWithSubLabel = 92;
+    custom_style.List.spacing = 20;
 
     if (R_FAILED(init()) || !brls::Application::init(TITLE, custom_style, brls::Theme::horizon()))
     {
@@ -144,6 +221,99 @@ int main(int argc, char* argv[]) {
     brls::TabFrame* rootFrame = new brls::TabFrame();
     rootFrame->setTitle(TITLE);
     rootFrame->setIcon(BOREALIS_ASSET("icon/MiiPort.png"));
+
+    // The category screen remains alive for the entire app session. Results
+    // open as a separate page, avoiding focused-view deletion during refreshes.
+    TopScrollList* browseList = new TopScrollList();
+    CatalogClient catalogClient;
+    CatalogTransport downloadTransport;
+    std::string pendingDownloadId;
+    bool downloading = false;
+    bool browseRequestPending = false;
+    bool requestTargetsResultsFrame = false;
+    CatalogResultsFrame* resultsFrame = nullptr;
+    constexpr std::array<CatalogSection, 5> sections = {{
+        CatalogSection::Trending, CatalogSection::New, CatalogSection::TopRated,
+        CatalogSection::Official, CatalogSection::Random,
+    }};
+    auto beginBrowseRequest = [&](CatalogSection section, const std::string& query = "",
+                                  size_t start = 0, bool fromResultsFrame = false) {
+        if (browseRequestPending) {
+            brls::Application::notify("Please wait for the current catalog request");
+            return;
+        }
+        if (downloading) {
+            brls::Application::notify("Please wait for the current Mii download");
+            return;
+        }
+        if (fromResultsFrame && resultsFrame != nullptr) resultsFrame->setNetworkBusy(true);
+        catalogClient.request(section, query, start);
+        browseRequestPending = true;
+        requestTargetsResultsFrame = fromResultsFrame;
+        brls::Application::notify(query.empty() ? "Loading Miis…" : "Searching Miis…");
+    };
+    auto showMiiDetails = [&](const CatalogMii& mii) {
+        std::stringstream details;
+        details << mii.name << "\n\nCreator: " << mii.creator << "\nSource: " << mii.source
+                << "\nDescription: " << mii.tags << "\nLikes: " << mii.score;
+        brls::Dialog* dialog = new brls::Dialog(new brls::Label(brls::LabelStyle::REGULAR, details.str(), true));
+        dialog->addButton("Download", [dialog, mii, &downloadTransport, &pendingDownloadId,
+                                        &downloading, &browseRequestPending, &resultsFrame](brls::View*) {
+            if (browseRequestPending) {
+                brls::Application::notify("Please wait for the current catalog request");
+                return;
+            }
+            if (downloading || !downloadTransport.start(mii.downloadUrl)) {
+                brls::Application::notify("A download is already in progress");
+                return;
+            }
+            if (resultsFrame != nullptr) resultsFrame->setNetworkBusy(true);
+            pendingDownloadId = mii.id;
+            downloading = true;
+            brls::Application::notify("Downloading one CHARINFO file…");
+            dialog->close();
+        });
+        dialog->addButton("Close", [dialog](brls::View*) { dialog->close(); });
+        dialog->open();
+    };
+    auto openResults = [&] {
+        const CatalogPage& page = catalogClient.page();
+        if (requestTargetsResultsFrame) {
+            if (resultsFrame != nullptr) resultsFrame->setPage(page);
+            return;
+        }
+        resultsFrame = new CatalogResultsFrame(
+            [&](CatalogSection section, const std::string& query, size_t start) {
+                beginBrowseRequest(section, query, start, true);
+            },
+            showMiiDetails,
+            [&](CatalogResultsFrame* closing) {
+                if (resultsFrame == closing) resultsFrame = nullptr;
+            });
+        resultsFrame->setPage(page, false);
+        brls::Application::pushView(resultsFrame, brls::ViewAnimation::SLIDE_LEFT);
+    };
+
+    browseList->addView(new brls::Header("Mii Gallery", false));
+    browseList->addView(new brls::Label(brls::LabelStyle::REGULAR,
+        "Browse InfiniMii on demand. Pages are cached for 10 minutes and nothing is prefetched.", true));
+    auto* searchItem = new brls::ListItem("Search Miis", "", "Name, creator, description, or uploader");
+    searchItem->getClickEvent()->subscribe([&](brls::View*) {
+        if (browseRequestPending) {
+            brls::Application::notify("Please wait for the current catalog request");
+            return;
+        }
+        const bool opened = brls::Swkbd::openForText([&](std::string query) {
+            if (!query.empty()) beginBrowseRequest(CatalogSection::Trending, query);
+        }, "Search Miis", "Searches InfiniMii", CatalogClient::MAX_QUERY_BYTES);
+        if (!opened) brls::Application::notify("Could not open the Switch keyboard");
+    });
+    browseList->addView(searchItem);
+    for (CatalogSection section : sections) {
+        auto* category = new brls::ListItem(CatalogStore::title(section), "", CatalogStore::subtitle(section));
+        category->getClickEvent()->subscribe([&, section](brls::View*) { beginBrowseRequest(section); });
+        browseList->addView(category);
+    }
 
     TopScrollList* aboutList = new TopScrollList();
 
@@ -164,6 +334,7 @@ int main(int argc, char* argv[]) {
     "For example \"7C118DA34ADB46CB8FFC083BD00DC111.coredata\"\n"
     , true));
 
+    #if MII_PORT_ENABLE_QR
     aboutList->addView(new FocusHeader("QR key info", false));
     aboutList->addView(new brls::Label(brls::LabelStyle::REGULAR, 
     "In order to import Miis from a QR code or generate QR codes, you must supply the Mii QR key. This is needed to decrypt the Mii data stored in Mii QR codes.\n\n"
@@ -173,6 +344,7 @@ int main(int argc, char* argv[]) {
     "\"[0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA, 0xAA]\"\n"
     "or \"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\"\n"
     , true));
+    #endif
 
     const fs::path import_path = "/MiiPort/miis";
 
@@ -247,9 +419,9 @@ int main(int argc, char* argv[]) {
                 [export_path{std::move(export_path)}, mii{miis[i]}]
                 (brls::View* view) {
                     // todo: ask before replacing file?
-                    writeToFile(export_path.c_str(), &mii);
-                    brls::Application::notify("Exported!");
+                    errorNotify(writeToFile(export_path.c_str(), &mii), "Exported!");
                 });
+                #if MII_PORT_ENABLE_QR
                 miiItem->registerAction("Show Mii QR", brls::Key::Y, [mii{miis[i]}, name{utf8_name}] {
                     ver3StoreData qr_data;
                     charInfoToVer3StoreData(&mii, &qr_data);
@@ -259,11 +431,13 @@ int main(int argc, char* argv[]) {
                     }
                     return true;
                 });
+                #endif
                 exportList->addView(miiItem);
             }
         }
     }
 
+    rootFrame->addTab("Browse", browseList);
     rootFrame->addTab("Import", fileList);
     rootFrame->addTab("Export", exportList);
     rootFrame->addSeparator();
@@ -279,7 +453,59 @@ int main(int argc, char* argv[]) {
     
     brls::Application::pushView(rootFrame);
 
-    while (brls::Application::mainLoop()){};
+    while (brls::Application::mainLoop()) {
+        if (browseRequestPending) {
+            catalogClient.pump();
+            if (catalogClient.state() == CatalogRequestState::Ready) {
+                browseRequestPending = false;
+                openResults();
+            } else if (catalogClient.state() == CatalogRequestState::Failed) {
+                browseRequestPending = false;
+                if (requestTargetsResultsFrame && resultsFrame != nullptr)
+                    resultsFrame->setNetworkBusy(false);
+                brls::Application::notify(catalogClient.error().empty()
+                    ? "The catalog request failed" : catalogClient.error());
+            }
+        }
+        if (downloading) {
+            downloadTransport.pump();
+            if (downloadTransport.state() != CatalogTransportState::Loading) {
+                CatalogHttpResponse response = downloadTransport.takeResponse();
+                downloading = false;
+                if (resultsFrame != nullptr) resultsFrame->setNetworkBusy(false);
+                if (response.status < 200 || response.status >= 300 || !response.error.empty() || response.body.size() != sizeof(charInfo)) {
+                    brls::Application::notify("Download failed or returned an invalid CHARINFO file");
+                    continue;
+                }
+                std::string safeId;
+                for (unsigned char c : pendingDownloadId) {
+                    safeId += (std::isalnum(c) || c == '-' || c == '_') ? static_cast<char>(c) : '_';
+                }
+                const fs::path downloads = "/MiiPort/miis/Downloads";
+                const fs::path destination = downloads / (safeId + ".charinfo");
+                const fs::path temporary = downloads / (safeId + ".tmp");
+                std::error_code error;
+                fs::create_directories(downloads, error);
+                FILE* file = error ? nullptr : fopen(temporary.c_str(), "wb");
+                const bool written = file != nullptr && fwrite(response.body.data(), 1, response.body.size(), file) == response.body.size();
+                if (file != nullptr) fclose(file);
+                if (!written) {
+                    fs::remove(temporary, error);
+                    brls::Application::notify("Could not save the downloaded CHARINFO file");
+                    continue;
+                }
+                fs::remove(destination, error);
+                error.clear();
+                fs::rename(temporary, destination, error);
+                if (error) {
+                    fs::remove(temporary, error);
+                    brls::Application::notify("Could not finalize the downloaded CHARINFO file");
+                    continue;
+                }
+                errorNotify(miiDbAddOrReplaceCharInfoFromFile(destination.c_str()), "Downloaded and imported!");
+            }
+        }
+    };
 
     // Exit
     deinit();
