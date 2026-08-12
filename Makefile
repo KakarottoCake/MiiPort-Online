@@ -43,8 +43,9 @@ SOURCES		:=	source
 DATA		:=	data
 ICON		:=	resources/icon/MiiPortTitle.jpg
 INCLUDES	:=	include libs/glm
-APP_AUTHOR	:=	Genwald
-APP_VERSION	:=	0.1.2
+APP_TITLE	:=	MiiPort Online
+APP_AUTHOR	:=	Genwald & KCake
+APP_VERSION	:=	0.1.3-Online
 
 # QR-image importing is optional. Catalog downloads use compact CHARINFO files,
 # so disabling it reduces binary size and avoids a JPEG decoder dependency.

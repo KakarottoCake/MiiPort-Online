@@ -125,7 +125,7 @@ class FocusHeader : public brls::Header {
         }
 };
 
-const std::string TITLE = "MiiPort";
+const std::string TITLE = "MiiPort Online";
 
 class CatalogResultsFrame : public brls::AppletFrame {
   public:
