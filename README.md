@@ -1,4 +1,4 @@
-# MiiPort Gallery
+# MiiPort Online
 
 A performance-first Nintendo Switch homebrew for importing, exporting, browsing, and downloading Miis. It is based on Genwald's MiiPort and retains its local import/export workflow.
 
