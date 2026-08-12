@@ -1,10 +1,42 @@
 # MiiPort Online
 
-MiiPort Online lets you find Miis on a Switch and add them to your local Mii database. It adds an online browser to Genwald's MiiPort, so you don't have to find a Mii on a website, download a file on another device, and move it to the console by hand.
+<div align="center">
+  <em>Find, view, and download Miis without leaving your Switch.</em>
+</div>
 
-The online browser uses InfiniMii. You can search by name, creator, description, or uploader. You can also browse Popular This Week, New, Top Miis, Official Miis, and Random Miis. Results show as a 4×3 image grid. Use the D-pad or control stick to move around, L and R to change pages, and A to view a Mii and download it.
+MiiPort Online adds an InfiniMii browser to [MiiPort](https://github.com/Genwald/MiiPort). Search for a Mii or browse the available lists, then save it to your local Mii database. You don't need to download a file on another device or move it to your console by hand.
 
-The original local import and export features are still included.
+The original local import and export tools are still included.
+
+## What it does
+
+- Search by Mii name, creator, description, or uploader.
+- Browse Popular This Week, New, Top Miis, Official Miis, and Random Miis.
+- View results in a 4×3 image grid.
+- Use the D-pad or control stick to move through the grid.
+- Change pages with L and R.
+- Open a Mii to view its details and download it.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/01-browse.png" alt="Browse screen"></td>
+    <td width="50%"><img src="docs/screenshots/02-popular-grid.png" alt="Popular Mii grid"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Browse categories and search</sub></td>
+    <td align="center"><sub>Popular Miis in the image grid</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/screenshots/03-official-grid.png" alt="Official Mii grid"></td>
+    <td width="50%"><img src="docs/screenshots/04-mii-details.png" alt="Mii details and download dialog"></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Official Miis</sub></td>
+    <td align="center"><sub>Mii details and download</sub></td>
+  </tr>
+</table>
 
 ## Install
 
@@ -23,9 +55,7 @@ is_db_test_mode_enabled=u8!0x1
 
 ## Build from source
 
-You'll need devkitPro with libnx, libcurl, and the Switch build tools.
-
-Clone the release branch with its submodules:
+Install devkitPro with libnx, libcurl, and the Switch build tools. Then clone the project with its submodules:
 
 ```sh
 git clone --branch v0.1.3-Online --recurse-submodules https://github.com/KakarottoCake/MiiPort-Online.git
@@ -35,7 +65,7 @@ cd MiiPort-Online
 
 The build writes `MiiPort.nro` to the project folder. Copy it to `sd:/switch/` to test it on a Switch or in Eden.
 
-To build the optional QR import support, run:
+To include the optional QR import support, run:
 
 ```sh
 ./scripts/build-local ENABLE_QR=1 -j2
@@ -52,31 +82,13 @@ The macOS harness tests the catalog parser and network client without building a
 
 The first command builds the harness. The second runs the offline fixture test. Add `--live` to make one bounded request to InfiniMii.
 
-## Screenshots
-
-### Browse
-
-![Browse screen](docs/screenshots/01-browse.png)
-
-### Popular Miis
-
-![Popular Mii grid](docs/screenshots/02-popular-grid.png)
-
-### Official Miis
-
-![Official Mii grid](docs/screenshots/03-official-grid.png)
-
-### Mii details and download
-
-![Mii details dialog](docs/screenshots/04-mii-details.png)
-
 ## Performance
 
 - Only the current page is requested.
-- One catalog, preview, or download request runs at a time.
-- Preview images load one at a time and are cached on the SD card.
 - Catalog pages are cached for 10 minutes.
+- Preview images load one at a time and are cached on the SD card.
 - Only the current page's 12 preview images stay in GPU memory.
+- Catalog, preview, and download requests run one at a time.
 
 ## License
 
